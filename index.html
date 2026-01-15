@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title> Chronometer</title>
+    <style>
+        @font-face {
+            font-family: 'Aurek-Besh';
+            src: url('https://raw.githubusercontent.com/jDPickering1010010/hostfiles/35316c0bcc4d02ef159b9847b15889729ef54386/fonts/Aurek-Besh.woff') format('woff');
+        }
+
+        body { 
+            margin: 0; 
+            background: #020202; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            height: 100vh; 
+            overflow: hidden;
+        }
+
+        #fontLoader {
+            font-family: 'Aurek-Besh';
+            position: absolute;
+            visibility: hidden;
+            height: 0;
+            overflow: hidden;
+        }
+        
+        canvas {
+             box-shadow: 0 0 30px rgba(0, 100, 255, 0.1);
+        }
+    </style>
+</head>
+<body>
+
+<div id="fontLoader">12:34:56</div>
+
+<canvas id="chronoCanvas" width="600" height="600"></canvas>
+
+<script>
+    const canvas = document.getElementById('chronoCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+
+    const COLOR_OUTER  = "#5e91ff";
+    const COLOR_MIDDLE = "#4c67ff"; 
+    const COLOR_INNER  = "#444eff"; 
+    const COLOR_MARKER = "#7cdeff"; 
+    const COLOR_DEFAULT_TEXT = "#7cdeff"; 
+
+    const SPEED_MINUTE = 60000;
+    const SPEED_HOUR   = 3600000;
+    const SPEED_DAY    = 86400000;
+
+    let isGlitching = false;
+    let glitchEndTime = 0;
+
+    function drawTrack(radius, dashCount, duration, timestamp, colorHex) {
+        ctx.save();
+        ctx.beginPath();
+        const circumference = 2 * Math.PI * radius;
+        const segmentLen = circumference / dashCount;
+        const dashLen = segmentLen / 2;
+        const gapLen = segmentLen / 2;
+        ctx.setLineDash([dashLen, gapLen]);
+        const progress = (timestamp % duration) / duration;
+        const offset = (progress * circumference); 
+        ctx.lineDashOffset = offset;
+        ctx.strokeStyle = colorHex; 
+        ctx.globalAlpha = 0.4; 
+        ctx.lineWidth = 4;
+        ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+        return dashLen; 
+    }
+
+    function drawMarker(radius, dashLength, value, maxValue) {
+        ctx.save();
+        ctx.beginPath();
+        const anglePerUnit = (Math.PI * 2) / maxValue;
+        const startAngle = (anglePerUnit * value) - (Math.PI / 2);
+        const dashAngleSize = dashLength / radius; 
+        const adjustedStart = startAngle - (dashAngleSize / 2);
+        const adjustedEnd = adjustedStart + dashAngleSize;
+        ctx.strokeStyle = COLOR_MARKER; 
+        ctx.lineWidth = 8;
+        ctx.lineCap = "butt";        
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = COLOR_MARKER;
+        ctx.arc(centerX, centerY, radius, adjustedStart, adjustedEnd);
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawScanlines() {
+        ctx.save();
+        ctx.fillStyle = "rgba(0, 0, 0, 0.15)";   
+        ctx.globalCompositeOperation = "source-over";
+
+        for (let y = 0; y < canvas.height; y += 4) {
+            ctx.fillRect(0, y, canvas.width, 2);
+        }
+        ctx.restore();
+    }
+
+    function applyGlitchEffect() {
+        if (!isGlitching) return;
+
+        ctx.save();
+        const numSlices = Math.floor(Math.random() * 5) + 3;
+        
+        for (let i = 0; i < numSlices; i++) {
+            const sliceY = Math.floor(Math.random() * canvas.height);
+            const sliceHeight = Math.floor(Math.random() * 30) + 5; 
+            const sliceOffset = Math.floor((Math.random() - 0.5) * 30);
+
+            ctx.drawImage(
+                canvas, 
+                0, sliceY, canvas.width, sliceHeight, 
+                sliceOffset, sliceY, canvas.width, sliceHeight 
+            );
+        }
+
+        ctx.fillStyle = `rgba(${Math.random()*255}, ${Math.random()*255}, ${Math.random()*255}, 0.05)`;
+        ctx.fillRect(0,0,canvas.width, canvas.height);
+        
+        ctx.restore();
+    }
+
+    function animate(timestamp) {
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const now = new Date();
+        const ms = now.getMilliseconds();
+        const sec = now.getSeconds() + (ms / 1000);
+        const min = now.getMinutes() + (sec / 60);
+        const hr  = now.getHours() + (min / 60);
+
+        const dashLenSec = drawTrack(180, 60, SPEED_MINUTE, timestamp, COLOR_OUTER);
+        drawMarker(180, dashLenSec, sec, 60);
+        const dashLenMin = drawTrack(140, 60, SPEED_HOUR, timestamp, COLOR_MIDDLE);
+        drawMarker(140, dashLenMin, min, 60);
+        const dashLenHr = drawTrack(100, 24, SPEED_DAY, timestamp, COLOR_INNER);
+        drawMarker(100, dashLenHr, hr, 24);
+
+        let textColor = COLOR_DEFAULT_TEXT;
+        let fontScale = 32;
+        let blurAmount = 10;
+
+        const isSecondsEnding = sec > 55;
+        const isMinuteEnding  = min > 59 && isSecondsEnding; 
+        const isDayEnding     = hr > 23 && isMinuteEnding;   
+
+        const pulse = Math.abs(Math.sin(timestamp / 200)); 
+        const pulseSizeAdd = pulse * 4; 
+
+        if (isDayEnding) {
+            textColor = COLOR_INNER; fontScale = 34 + pulseSizeAdd; blurAmount = 30;
+        } else if (isMinuteEnding) {
+            textColor = COLOR_MIDDLE; fontScale = 34 + pulseSizeAdd; blurAmount = 30;
+        } else if (isSecondsEnding) {
+            textColor = COLOR_OUTER; fontScale = 32 + pulseSizeAdd; blurAmount = 25;
+        }
+
+        ctx.save();
+        ctx.fillStyle = textColor;
+        ctx.font = `${fontScale}px 'Aurek-Besh', monospace`; 
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.shadowBlur = blurAmount;
+        ctx.shadowColor = textColor;
+        const timeString = now.toLocaleTimeString('en-US', { hour12: false });
+        ctx.fillText(timeString, centerX, centerY);
+        ctx.restore();
+
+        drawScanlines();
+        if (!isGlitching && Math.random() < 0.005) {
+             isGlitching = true;
+             glitchEndTime = timestamp + 100 + Math.random() * 300;
+        }
+        
+        if (isGlitching && timestamp > glitchEndTime) {
+            isGlitching = false;
+        }
+
+        applyGlitchEffect();
+
+        requestAnimationFrame(animate);
+    }
+
+    document.fonts.ready.then(function () {
+       requestAnimationFrame(animate);
+    });
+
+</script>
+
+</body>
+</html>
