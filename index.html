@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aurebesh CRT Chronometer v2</title>
+    <title>Aurebesh CRT Chronometer v4</title>
     <style>
         
         @font-face {
@@ -74,17 +74,18 @@
             text-align: right;
             color: #7cdeff;
             font-family: monospace; 
+            width: 260px;
         }
 
         #configPanel input {
             background: #000;
             border: 1px solid #444eff;
             color: #7cdeff;
-            width: 50px;
+            width: 40px;
             padding: 5px;
             text-align: center;
-            font-size: 16px;
-            margin: 0 5px;
+            font-size: 14px;
+            margin: 0 2px;
         }
 
         #configPanel label {
@@ -94,6 +95,35 @@
         }
 
         .row { margin-bottom: 15px; }
+        
+        .section-label {
+            font-size: 10px;
+            color: #4c67ff;
+            margin-bottom: 5px;
+            text-align: center;
+        }
+
+        #alarmList {
+            margin-top: 15px;
+            border-top: 1px dashed #333;
+            padding-top: 10px;
+            font-size: 12px;
+            text-align: left;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+        
+        .alarm-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            color: #5e91ff;
+        }
+        
+        .alarm-triggered {
+            color: #ff4444;
+            text-decoration: line-through;
+        }
 
         .visible { display: block !important; }
 
@@ -101,7 +131,7 @@
 </head>
 <body>
 
-<div id="fontLoader">12:34:56</div>
+<div id="fontLoader">12:34:56 [|0|]</div>
 
 <div id="uiLayer">
     <button id="toggleConfigBtn">CONFIG</button>
@@ -110,20 +140,40 @@
         <div class="row" style="border-bottom: 1px solid #333; padding-bottom:10px; margin-bottom:10px; font-family:'Aurek-Besh'">
             SYSTEM MODE
         </div>
-        <div class="row">
-            <button id="modeClockBtn" style="width:100%; margin-bottom:5px;">CLOCK MODE</button>
+        <div class="row" style="display: flex; flex-direction: column; gap: 5px;">
+            <button id="modeClockBtn" style="width:100%;">CLOCK MODE</button>
             <button id="modeTimerBtn" style="width:100%;">TIMER MODE</button>
+            <button id="modeAlarmBtn" style="width:100%;">ALARM MODE</button>
         </div>
         
         <div id="timerInputs" style="display:none; opacity: 0.5; transition: opacity 0.3s;">
-            <div class="row">
-                <label>HRS</label><input type="number" id="inpHz" value="0" min="0">
-                <label>MIN</label><input type="number" id="inpMin" value="5" min="0">
-                <label>SEC</label><input type="number" id="inpSec" value="0" min="0">
+            <div class="section-label">COUNTDOWN DURATION</div>
+            <div class="row" style="display: flex; justify-content: center; align-items: center;">
+                <label>H</label><input type="number" id="inpHz" value="0" min="0">
+                <label>M</label><input type="number" id="inpMin" value="5" min="0">
+                <label>S</label><input type="number" id="inpSec" value="0" min="0">
             </div>
             <div class="row">
-                <button id="startTimerBtn" style="color:#7cdeff; border-color:#7cdeff">INITIALIZE COUNTDOWN</button>
+                <button id="startTimerBtn" style="color:#7cdeff; border-color:#7cdeff; width:100%;">INITIALIZE TIMER</button>
             </div>
+        </div>
+
+        <div id="alarmInputs" style="display:none; opacity: 0.5; transition: opacity 0.3s;">
+            <div class="section-label">TARGET DATE (MM/DD/YYYY)</div>
+            <div class="row" style="display: flex; justify-content: center; align-items: center;">
+                <input type="number" id="inpAlMo" placeholder="MM" min="1" max="12"> /
+                <input type="number" id="inpAlDa" placeholder="DD" min="1" max="31"> /
+                <input type="number" id="inpAlYr" placeholder="YYYY" min="2024" style="width:60px">
+            </div>
+            <div class="section-label">TARGET TIME (24HR)</div>
+            <div class="row" style="display: flex; justify-content: center; align-items: center;">
+                <input type="number" id="inpAlHr" placeholder="HH" min="0" max="23"> :
+                <input type="number" id="inpAlMi" placeholder="MM" min="0" max="59">
+            </div>
+            <div class="row">
+                <button id="addAlarmBtn" style="color:#7cdeff; border-color:#7cdeff; width:100%;">SET ALARM</button>
+            </div>
+            <div id="alarmList"></div>
         </div>
     </div>
 </div>
@@ -154,30 +204,64 @@
     let isGlitching = false;
     let glitchEndTime = 0;
     
-    let appMode = 'CLOCK';
+    let appMode = 'CLOCK'; 
     let timerEndTime = 0;
     let timerTotalDuration = 0;
     let timerRunning = false;
 
+    let hasPlayedTimerAlert = false;
+    let frozenOuterTime = 0;
+    const alertAudio = new Audio('alert.mp3');
+
+    let userAlarms = [];
+
     const configPanel = document.getElementById('configPanel');
     const timerInputs = document.getElementById('timerInputs');
+    const alarmInputs = document.getElementById('alarmInputs');
+    const alarmListDiv = document.getElementById('alarmList');
     
     document.getElementById('toggleConfigBtn').addEventListener('click', () => {
         const isHidden = configPanel.style.display === 'none';
         configPanel.style.display = isHidden ? 'block' : 'none';
     });
 
+    function triggerAlarmSequence() {
+        let playCount = 0;
+        alertAudio.currentTime = 0;
+        alertAudio.play().catch(e => console.warn("Audio play blocked by browser:", e));
+        playCount++;
+        
+        const playInterval = setInterval(() => {
+            alertAudio.currentTime = 0;
+            alertAudio.play().catch(e => console.warn("Audio play blocked by browser:", e));
+            playCount++;
+            if (playCount >= 6) {
+                clearInterval(playInterval);
+            }
+        }, 2000); 
+    }
+
     document.getElementById('modeClockBtn').addEventListener('click', () => {
         appMode = 'CLOCK';
         timerRunning = false;
+        hasPlayedTimerAlert = false;
         timerInputs.style.display = 'none';
-        timerInputs.style.opacity = '0.5';
+        alarmInputs.style.display = 'none';
     });
 
     document.getElementById('modeTimerBtn').addEventListener('click', () => {
         appMode = 'TIMER';
+        alarmInputs.style.display = 'none';
         timerInputs.style.display = 'block';
         setTimeout(() => timerInputs.style.opacity = '1', 50);
+    });
+
+    document.getElementById('modeAlarmBtn').addEventListener('click', () => {
+        appMode = 'CLOCK'; 
+        timerInputs.style.display = 'none';
+        alarmInputs.style.display = 'block';
+        setTimeout(() => alarmInputs.style.opacity = '1', 50);
+        renderAlarmList();
     });
 
     document.getElementById('startTimerBtn').addEventListener('click', () => {
@@ -190,9 +274,61 @@
             timerTotalDuration = totalMs;
             timerEndTime = Date.now() + totalMs;
             timerRunning = true;
+            hasPlayedTimerAlert = false; 
             configPanel.style.display = 'none'; 
         }
     });
+
+    document.getElementById('addAlarmBtn').addEventListener('click', () => {
+        const mo = parseInt(document.getElementById('inpAlMo').value);
+        const da = parseInt(document.getElementById('inpAlDa').value);
+        const yr = parseInt(document.getElementById('inpAlYr').value);
+        const hr = parseInt(document.getElementById('inpAlHr').value) || 0;
+        const mi = parseInt(document.getElementById('inpAlMi').value) || 0;
+
+        if (mo && da && yr) {
+            const targetDate = new Date(yr, mo - 1, da, hr, mi, 0, 0);
+            const targetMs = targetDate.getTime();
+
+            if (targetMs > Date.now()) {
+                const pad = (n) => n.toString().padStart(2, '0');
+                const label = `${pad(mo)}/${pad(da)}/${yr} ${pad(hr)}:${pad(mi)}`;
+                
+                userAlarms.push({
+                    timestamp: targetMs,
+                    triggered: false,
+                    label: label
+                });
+                
+                document.getElementById('inpAlMo').value = '';
+                document.getElementById('inpAlDa').value = '';
+                document.getElementById('inpAlYr').value = '';
+                document.getElementById('inpAlHr').value = '';
+                document.getElementById('inpAlMi').value = '';
+                
+                renderAlarmList();
+            } else {
+                alert("Cannot set coordinate parameters in the past.");
+            }
+        } else {
+            alert("Please complete the Date fields (MM/DD/YYYY).");
+        }
+    });
+
+    function renderAlarmList() {
+        alarmListDiv.innerHTML = '';
+        if (userAlarms.length === 0) {
+            alarmListDiv.innerHTML = '<span style="color:#444eff;">NO ACTIVE ALARMS</span>';
+            return;
+        }
+
+        userAlarms.forEach((alarm) => {
+            const row = document.createElement('div');
+            row.className = 'alarm-item' + (alarm.triggered ? ' alarm-triggered' : '');
+            row.innerHTML = `<span>${alarm.label}</span> <span>${alarm.triggered ? 'SYS_TRIG' : 'ARMED'}</span>`;
+            alarmListDiv.appendChild(row);
+        });
+    }
 
     function hexToRgb(hex) {
         const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
@@ -204,7 +340,6 @@
     }
 
     function lerpColor(hexA, hexB, factor) {
-        // Clamp factor 0-1
         factor = Math.max(0, Math.min(1, factor));
         
         const c1 = hexToRgb(hexA);
@@ -257,6 +392,24 @@
         ctx.restore();
     }
 
+    function drawTacticalHUDDate(color) {
+        const now = new Date();
+        const mo = String(now.getMonth() + 1).padStart(2, '0');
+        const da = String(now.getDate()).padStart(2, '0');
+        const yr = String(now.getFullYear()).slice(-2);
+        const dateStr = ` |${mo[0]}|${mo[1]}|  /  |${da[0]}|${da[1]}|  /  |${yr[0]}|${yr[1]}|  `;
+
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.font = `20px 'Aurek-Besh', monospace`;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = color;
+        ctx.fillText(dateStr, 20, 20);
+        ctx.restore();
+    }
+
     function drawScanlines() {
         ctx.save();
         ctx.fillStyle = "rgba(0, 0, 0, 0.15)";
@@ -289,11 +442,28 @@
     function animate(timestamp) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+        const currentRealTimeMs = Date.now();
         let sec, min, hr;
         let cOuter, cMiddle, cInner, cMarker;
         let rotDir = 1;
         let pulseIntensityFactor = 1; 
         let timeString = "";
+        let remainingMs = 0; 
+
+        let alarmStateChanged = false;
+        userAlarms.forEach(alarm => {
+            if (!alarm.triggered && currentRealTimeMs >= alarm.timestamp) {
+                alarm.triggered = true;
+                alarmStateChanged = true;
+                triggerAlarmSequence();
+                
+                isGlitching = true;
+                glitchEndTime = timestamp + 1000;
+            }
+        });
+        if (alarmStateChanged && alarmInputs.style.display === 'block') {
+            renderAlarmList();
+        }
 
         if (appMode === 'CLOCK') {
             const now = new Date();
@@ -311,10 +481,9 @@
             pulseIntensityFactor = 1;
             rotDir = 1;
 
-        } else {
-            let remainingMs = 0;
+        } else if (appMode === 'TIMER') {
             if (timerRunning) {
-                remainingMs = Math.max(0, timerEndTime - Date.now());
+                remainingMs = Math.max(0, timerEndTime - currentRealTimeMs);
             } else {
                 remainingMs = timerTotalDuration || 0; 
             }
@@ -357,10 +526,21 @@
             
             if (remainingMs === 0 && timerRunning) {
                 pulseIntensityFactor = 0.5; 
+                
+                if (!hasPlayedTimerAlert) {
+                    hasPlayedTimerAlert = true;
+                    frozenOuterTime = timestamp; 
+                    triggerAlarmSequence();
+                }
             }
         }
 
-        const dashLenSec = drawTrack(180, 60, SPEED_MINUTE, timestamp, cOuter, rotDir);
+        let outerTrackTime = timestamp;
+        if (appMode === 'TIMER' && timerRunning && remainingMs === 0) {
+            outerTrackTime = frozenOuterTime;
+        }
+
+        const dashLenSec = drawTrack(180, 60, SPEED_MINUTE, outerTrackTime, cOuter, rotDir);
         drawMarker(180, dashLenSec, sec, 60, cMarker);
         
         const dashLenMin = drawTrack(140, 60, SPEED_HOUR, timestamp, cMiddle, rotDir);
@@ -389,6 +569,8 @@
         ctx.fillText(timeString, centerX, centerY);
         ctx.restore();
 
+        drawTacticalHUDDate(cMarker);
+
         drawScanlines();
 
         if (!isGlitching && Math.random() < 0.005) {
@@ -410,10 +592,5 @@
     });
 
 </script>
-
-</body>
-</html>
-</script>
-// ~~ another little code comment....Star Wars is a huge inspiration to my creative side.  Thank you to the House of the Mouse for all they have done to help keep that story going  ~~
 </body>
 </html>
